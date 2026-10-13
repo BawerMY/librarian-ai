@@ -3,6 +3,8 @@ from dotenv import load_dotenv
 from qdrant_client import QdrantClient
 from sentence_transformers import SentenceTransformer
 from pathlib import Path
+import uuid
+from qdrant_client.models import Distance, VectorParams, PointStruct
 
 load_dotenv()
 
@@ -12,6 +14,7 @@ MODEL_NAME = os.environ.get("MODEL_NAME")
 TEXT_PATH = Path(os.environ.get("TEXT_PATH")).expanduser()
 CHUNK_SIZE = int(os.environ.get("CHUNK_SIZE"))
 CHUNK_OVERLAP = int(os.environ.get("CHUNK_OVERLAP"))
+COLLECTION_NAME = os.environ.get("COLLECTION_NAME", "books")
 
 client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
 
@@ -41,11 +44,33 @@ def chunk_text(text):
 
 chunks = chunk_text(text)
 
-vectors = model.encode(
-    chunks,
-    batch_size=32,
-    show_progress_bar=True,
-    normalize_embeddings=True,
-)
+def upload_chunks(collection_name, chunks):
+    vectors = model.encode(
+        chunks,
+        batch_size=32,
+        show_progress_bar=True,
+        normalize_embeddings=True,
+    )
 
-print(vectors.shape)
+    if not client.collection_exists(collection_name):
+        client.create_collection(
+            collection_name=collection_name,
+            vectors_config=VectorParams(size=EMBEDDING_DIM, distance=Distance.COSINE),
+        )
+
+    source = TEXT_PATH.name
+    points = [
+        PointStruct(
+            id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"{source}:{i}")),
+            vector=vector.tolist(),
+            payload={"text": chunk, "source": source, "chunk_index": i},
+        )
+        for i, (chunk, vector) in enumerate(zip(chunks, vectors))
+    ]
+
+    for i in range(0, len(points), 64):
+        client.upsert(collection_name=collection_name, points=points[i:i + 64])
+
+    print(f"Uploaded {len(points)} chunks from '{source}' to '{collection_name}'")
+
+upload_chunks(COLLECTION_NAME, chunks)
