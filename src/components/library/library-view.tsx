@@ -174,7 +174,8 @@ export function LibraryView({
   const trimmedSearch = searchQuery.trim()
 
   return (
-    <div className="mx-auto flex w-full max-w-[860px] flex-col gap-5 px-5 py-7">
+    <div className="h-full overflow-y-auto">
+      <div className="mx-auto flex w-full max-w-[860px] flex-col gap-5 px-5 py-7">
       <div className="flex items-center gap-1 border-b border-line">
         {(
           [
@@ -289,7 +290,8 @@ export function LibraryView({
         </div>
       )}
 
-      <UploadDialog book={uploadFor} onClose={() => setUploadFor(null)} onDone={reloadShelf} />
+        <UploadDialog book={uploadFor} onClose={() => setUploadFor(null)} onDone={reloadShelf} />
+      </div>
     </div>
   )
 }

@@ -47,7 +47,8 @@ export function SettingsView({
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-[640px] flex-col gap-8 px-5 py-7">
+    <div className="h-full overflow-y-auto">
+      <div className="mx-auto flex w-full max-w-[640px] flex-col gap-8 px-5 py-7">
       <h1 className="m-0 text-[clamp(28px,4vw,36px)]">Settings</h1>
 
       <section className="flex flex-col gap-3">
@@ -120,6 +121,7 @@ export function SettingsView({
           </div>
         )}
       </section>
+      </div>
     </div>
   )
 }

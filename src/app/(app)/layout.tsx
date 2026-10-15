@@ -60,7 +60,12 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   }
 
   return (
-    <div className="flex min-h-screen bg-paper">
+    // h-dvh, not min-h-screen: the chat needs a DEFINITE height to resolve
+    // its own h-full against. With min-h-screen the height was only a floor,
+    // so Chat could not fill it and the page grew taller than the window
+    // instead of the message list scrolling — the composer scrolled away with
+    // it. dvh rather than vh so mobile browser chrome is accounted for.
+    <div className="flex h-dvh overflow-hidden bg-paper">
       {/* desktop sidebar */}
       <aside className="hidden w-[248px] shrink-0 flex-col gap-[22px] border-r border-line bg-sidebar px-3.5 py-5 md:flex">
         <div className="px-2">
@@ -119,7 +124,12 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           </NewChatButton>
         </header>
 
-        <main className="min-h-0 flex-1 pb-16 md:pb-0">{children}</main>
+        {/* Children own their scrolling. The chat scrolls its message list
+            while pinning the composer; the other pages scroll as a whole.
+            pb-16 keeps content clear of the mobile tab bar. */}
+        <main className="flex min-h-0 flex-1 flex-col overflow-hidden pb-16 md:pb-0">
+          {children}
+        </main>
 
         {/* mobile tab bar */}
         <nav className="fixed inset-x-0 bottom-0 flex h-16 border-t border-line bg-sidebar md:hidden">
