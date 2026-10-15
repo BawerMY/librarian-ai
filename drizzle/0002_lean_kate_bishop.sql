@@ -1,0 +1,3 @@
+ALTER TABLE "editions" DROP CONSTRAINT "index_status_values";--> statement-breakpoint
+CREATE UNIQUE INDEX "editions_one_private_per_user_book" ON "editions" USING btree ("owner_user_id","book_id") WHERE "editions"."kind" = 'private';--> statement-breakpoint
+ALTER TABLE "editions" ADD CONSTRAINT "index_status_values" CHECK ("editions"."index_status" IN ('awaiting_file','pending','parsing','embedding','ready','failed'));

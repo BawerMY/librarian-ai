@@ -1,0 +1,88 @@
+@import "tailwindcss";
+
+/*
+ * Palette lifted verbatim from the Claude Design source (LibrarianAI v2).
+ * The design deliberately commits to one warm-paper look — there is no dark
+ * variant, so colours are painted explicitly rather than left to inherit.
+ */
+@theme {
+  /* grounds, lightest to darkest */
+  --color-surface: #fbf8f2; /* cards, inputs, raised */
+  --color-paper: #f5f0e6; /* app background */
+  --color-sidebar: #efe8da; /* sidebar, user bubble */
+  --color-stage: #e6dfd1; /* outside the frame */
+
+  /* ink */
+  --color-ink: #221c18;
+  --color-ink-2: #3e3631;
+  --color-ink-3: #4a413a;
+  --color-muted: #5a5048;
+  --color-muted-2: #6e645a;
+  --color-faint: #8a7f73;
+
+  /* accent */
+  --color-accent: #7b2632;
+  --color-accent-hover: #5a1a24;
+  --color-accent-soft: #f0e1df; /* citation chip ground */
+
+  /* lines */
+  --color-line: #e3dacb;
+  --color-line-strong: #d6cbb8;
+  --color-line-input: #cfc3ae;
+
+  /* interaction */
+  --color-active: #e3d8c4;
+  --color-hover: #e6ddcc;
+
+  /* status pills */
+  --color-ok-bg: #e3eadf;
+  --color-ok-fg: #2f4a32;
+  --color-warn-bg: #f3ead6;
+  --color-warn-fg: #6b5320;
+
+  /* type */
+  --font-sans: var(--font-manrope), system-ui, sans-serif;
+  --font-serif: var(--font-garamond), Georgia, serif;
+}
+
+:root {
+  color-scheme: light;
+}
+
+body {
+  margin: 0;
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Display type is serif throughout the design. */
+h1,
+h2,
+h3 {
+  font-family: var(--font-serif);
+  font-weight: 400;
+  letter-spacing: -0.015em;
+}
+
+/* Section eyebrows: "STEP 1 OF 2", "RECENT", "LIBRARIANAI" */
+.eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-faint);
+}
+
+/* Inline quoted passage inside an answer. */
+.passage {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: 1.15em;
+}
+
+/* Wide content must scroll inside itself, never the page body. */
+.scroll-x {
+  overflow-x: auto;
+}

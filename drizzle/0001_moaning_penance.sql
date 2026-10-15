@@ -1,0 +1,2 @@
+ALTER TABLE "books" ADD COLUMN "gutenberg_id" integer;--> statement-breakpoint
+CREATE UNIQUE INDEX "books_gutenberg_id" ON "books" USING btree ("gutenberg_id") WHERE "books"."gutenberg_id" IS NOT NULL;
