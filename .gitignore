@@ -32,6 +32,9 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+# ...and the template is opted in: a clone has no other record of which
+# variables exist, and env.ts throws at boot on a missing one.
+!.env.example
 
 # vercel
 .vercel
