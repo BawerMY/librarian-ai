@@ -42,12 +42,6 @@ export default function LandingPage() {
             >
               Build my library
             </Link>
-            <Link
-              href="/signin"
-              className="flex h-12 items-center rounded-md border border-line-input px-[22px] text-[15px] font-semibold text-ink transition-colors hover:border-ink"
-            >
-              See an example
-            </Link>
           </div>
         </div>
 
@@ -104,8 +98,25 @@ export default function LandingPage() {
       </section>
 
       <footer className="flex flex-wrap justify-between gap-4 border-t border-line px-[clamp(18px,4vw,48px)] py-6 text-[13px] text-faint">
-        <span>© LibrarianAI</span>
-        <span>Self-hosted · your uploads stay on your own server</span>
+        <a
+          href="https://github.com/BawerMY/librarian-ai"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-ink-3 underline underline-offset-2 transition-colors hover:text-accent"
+        >
+          Source on GitHub
+        </a>
+        <span>
+          Made by{' '}
+          <a
+            href="https://www.bawer-my.com"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-ink-3 underline underline-offset-2 transition-colors hover:text-accent"
+          >
+            Bawer Yavuzatmaca
+          </a>
+        </span>
       </footer>
     </div>
   )
