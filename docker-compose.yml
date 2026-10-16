@@ -1,0 +1,86 @@
+# LibrarianAI — app, ingest worker and database.
+#
+# Qdrant and Ollama are NOT here: they are expected to be running already,
+# addressed by QDRANT_URL and OLLAMA_URL in the env file. Embedding is the
+# expensive part of this system and is worth sharing with whatever else uses
+# those services.
+#
+#   cp .env.example .env     # then fill it in
+#   docker compose up -d --build
+#
+# DATA_DIR defaults to ./.data for a local run; point it at a real disk in
+# production, e.g. DATA_DIR=/mnt/external-data/librarian
+
+x-app: &app
+  build:
+    context: .
+  image: librarian-ai:local
+  env_file: .env
+  environment:
+    # Inside the compose network the database is reachable by service name,
+    # whatever the env file says for a host-side connection.
+    DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-librarian}
+    UPLOAD_DIR: /app/.data/uploads
+  volumes:
+    # One volume for both containers, and it must be shared: the web container
+    # writes an upload, the worker reads it back to index it. It also holds the
+    # cached Gutenberg catalog, whose path is relative to the working
+    # directory. Losing this mid-index loses a user's book with no recovery.
+    - ${DATA_DIR:-./.data}/data:/app/.data
+  # Tailscale MagicDNS does not resolve inside a container. If QDRANT_URL or
+  # OLLAMA_URL use a MagicDNS name, map it here, or put the tailnet IP in the
+  # env file instead.
+  # extra_hosts:
+  #   - "homelab.tail6c8f4c.ts.net:100.x.y.z"
+  depends_on:
+    migrate:
+      condition: service_completed_successfully
+
+services:
+  postgres:
+    image: postgres:18
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-librarian}
+    volumes:
+      - ${DATA_DIR:-./.data}/postgres:/var/lib/postgresql/data
+    healthcheck:
+      # Everything else waits on this: a migration against a database still
+      # starting up fails in a way that looks like a schema problem.
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d ${POSTGRES_DB:-librarian}']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # Schema and vector collection, before anything serves traffic. Runs to
+  # completion and exits; both long-running services wait for that exit.
+  # Idempotent, so it is safe on every `up`.
+  migrate:
+    build:
+      context: .
+    image: librarian-ai:local
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-librarian}
+    # extra_hosts:
+    #   - "homelab.tail6c8f4c.ts.net:100.x.y.z"
+    command: sh -c 'pnpm db:migrate && pnpm qdrant:bootstrap'
+    restart: 'no'
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  web:
+    <<: *app
+    restart: unless-stopped
+    command: pnpm start
+    ports:
+      - '${PORT:-3000}:3000'
+
+  # Not optional. Indexing happens only here, so without it every added book
+  # stays pending forever and the library is permanently unsearchable.
+  worker:
+    <<: *app
+    restart: unless-stopped
+    command: pnpm worker:start

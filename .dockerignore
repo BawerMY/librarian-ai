@@ -1,0 +1,21 @@
+node_modules
+.next
+.git
+.github
+
+# Uploaded books and the cached catalog. .data/uploads holds users' own
+# copyrighted EPUBs — baking them into an image would redistribute exactly
+# what this app is careful not to. It is a mounted volume at runtime.
+.data
+
+# Secrets never belong in a build context; the image reads them from the
+# environment at run time.
+.env
+.env.*
+!.env.example
+
+*.tsbuildinfo
+next-env.d.ts
+npm-debug.log*
+.pnpm-debug.log*
+.DS_Store

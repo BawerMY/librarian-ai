@@ -31,6 +31,21 @@ pnpm worker                     # ingestion, in a second terminal
 
 Both processes are needed: the app serves and the worker indexes.
 
+### With Docker
+
+```bash
+cp .env.example .env            # fill in POSTGRES_PASSWORD, AUTH_SECRET, OPENROUTER_API_KEY
+docker compose up -d --build
+```
+
+Brings up Postgres, a one-shot migration, the app and the worker. Qdrant and
+Ollama are expected to be running already — embedding is the expensive part of
+this system and is worth sharing. Set `DATA_DIR` to put uploads, the catalog
+cache and the database on a real disk.
+
+If `QDRANT_URL` or `OLLAMA_URL` use a Tailscale MagicDNS name, containers will
+not resolve it; use the tailnet IP or the commented `extra_hosts` entries.
+
 | | |
 |---|---|
 | `pnpm verify:chat` | grounding — searches before answering, citations resolve, refuses when it should |
