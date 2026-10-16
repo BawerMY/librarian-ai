@@ -2,14 +2,23 @@
 
 import { useChat } from '@ai-sdk/react'
 import { DefaultChatTransport, type UIMessage } from 'ai'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 
 import { notifyChatUpdated } from './chat-events'
 
 import type { CitationChip } from '@/lib/ai/tools'
 
 import { Answer } from './answer'
+import * as partial from './partial-answer'
+import type { Snapshot } from './partial-answer'
 import { PassageDrawer } from './passage-drawer'
+
+function textOf(message: UIMessage): string {
+  return message.parts
+    .filter((p) => p.type === 'text')
+    .map((p) => (p as { text: string }).text)
+    .join('')
+}
 
 export function Chat({
   chatId,
@@ -46,13 +55,46 @@ export function Chat({
   })
 
   /**
+   * Keep what the answer looked like when the view went away.
+   *
+   * Leaving the chat unmounts this component and aborts the response stream,
+   * so the half-written answer on screen was simply gone on return: the user
+   * saw three paragraphs, switched to the library, came back, and got "Still
+   * answering" with nothing under it. Generation never stopped — only the
+   * reader did — so the text is worth holding on to.
+   *
+   * sessionStorage, not state: it has to survive the unmount, and it is
+   * per-tab and disposable, which is exactly the lifetime of a draft answer.
+   */
+  const storageKey = partial.key(sessionId ?? chatId)
+
+  const raw = useSyncExternalStore(
+    partial.subscribe,
+    () => partial.read(storageKey),
+    () => null,
+  )
+
+  const snapshot = useMemo<Snapshot | null>(() => {
+    if (!raw) return null
+    try {
+      return JSON.parse(raw) as Snapshot
+    } catch {
+      return null
+    }
+  }, [raw])
+
+  /**
    * Citations arrive two ways: inlined with historical messages, and streamed
    * as `data-citations` parts while the answer is being written. Merging both
    * into one map means the chip renderer does not care which turn a marker
    * came from.
    */
   const citations = useMemo(() => {
-    const map: Record<string, CitationChip> = { ...initialCitations, ...recovered }
+    const map: Record<string, CitationChip> = {
+      ...initialCitations,
+      ...(snapshot?.citations ?? {}),
+      ...recovered,
+    }
     for (const m of messages) {
       for (const part of m.parts) {
         if (part.type === 'data-citations') {
@@ -61,7 +103,7 @@ export function Chat({
       }
     }
     return map
-  }, [messages, initialCitations, recovered])
+  }, [messages, initialCitations, recovered, snapshot])
 
   const busy = status === 'submitted' || status === 'streaming'
 
@@ -91,6 +133,20 @@ export function Chat({
    */
   const awaitingReply =
     !busy && messages.length > 0 && messages[messages.length - 1]?.role === 'user'
+
+  useEffect(() => {
+    const last = messages[messages.length - 1]
+    if (last?.role !== 'assistant') return
+
+    if (busy) {
+      const text = textOf(last)
+      if (text) partial.save(storageKey, { text, citations })
+    } else {
+      // The real answer is on screen (streamed to the end, or recovered from
+      // the database); the stand-in has nothing left to stand in for.
+      partial.clear(storageKey)
+    }
+  }, [messages, busy, citations, storageKey])
 
   useEffect(() => {
     if (!awaitingReply) return
@@ -149,7 +205,10 @@ export function Chat({
       window.history.replaceState(null, '', `/chat/${chatId}`)
     }
 
-    notifyChatUpdated()
+    // The session row is written by the server, so announce the chat here with
+    // its id and title: the sidebar shows it at once instead of waiting for a
+    // poll to notice a row that did not exist when the list was last fetched.
+    notifyChatUpdated({ id: sessionId ?? chatId, title: t.slice(0, 120) })
     void sendMessage({ text: t })
   }
 
@@ -181,10 +240,7 @@ export function Chat({
           )}
 
           {messages.map((m) => {
-            const text = m.parts
-              .filter((p) => p.type === 'text')
-              .map((p) => (p as { text: string }).text)
-              .join('')
+            const text = textOf(m)
 
             if (m.role === 'user') {
               return (
@@ -208,22 +264,18 @@ export function Chat({
             )
           })}
 
-          {awaitingReply && (
+          {/* Reopening a chat mid-answer looks exactly like never having left
+              it: the text so far if there is any, otherwise the same searching
+              line a fresh question shows. Where the work is happening is not
+              something the reader should have to think about. */}
+          {(awaitingReply || (busy && messages[messages.length - 1]?.role === 'user')) && (
             <div className="flex flex-col gap-2.5">
               <div className="eyebrow">LibrarianAI</div>
-              <div className="text-[15px] text-muted">
-                Still answering — this keeps running on the server, so you can leave and come
-                back.
-              </div>
-            </div>
-          )}
-
-          {busy && messages[messages.length - 1]?.role === 'user' && (
-            <div className="flex flex-col gap-2.5">
-              <div className="eyebrow">LibrarianAI</div>
-              <div className="text-[15px] text-muted">
-                Looking through {searchableCount} {searchableCount === 1 ? 'book' : 'books'}…
-              </div>
+              {snapshot?.text ? (
+                <Answer text={snapshot.text} citations={citations} onOpen={setOpen} />
+              ) : (
+                <Searching searchableCount={searchableCount} />
+              )}
             </div>
           )}
 
@@ -235,7 +287,7 @@ export function Chat({
         </div>
       </div>
 
-      <div className="shrink-0 border-t border-line bg-paper px-5 py-4">
+      <div className="shrink-0 bg-paper px-5 py-4">
         <div className="mx-auto flex w-full max-w-[720px] items-center gap-2 rounded-lg border border-line-input bg-surface px-3 focus-within:border-accent">
           <input
             value={draft}
@@ -272,6 +324,16 @@ export function Chat({
   )
 }
 
+/** The one "work is happening" line, so a resumed answer and a fresh one
+ *  cannot drift apart in wording. */
+function Searching({ searchableCount }: { searchableCount: number }) {
+  return (
+    <div className="text-[15px] text-muted">
+      Looking through {searchableCount} {searchableCount === 1 ? 'book' : 'books'}…
+    </div>
+  )
+}
+
 /**
  * While the model is searching, show what it is doing rather than a spinner.
  * Retrieval takes a second or two and naming the book being searched makes
@@ -285,13 +347,7 @@ function ToolActivity({
   searchableCount: number
 }) {
   const calls = message.parts.filter((p) => p.type.startsWith('tool-'))
-  if (!calls.length) {
-    return (
-      <div className="text-[15px] text-muted">
-        Looking through {searchableCount} {searchableCount === 1 ? 'book' : 'books'}…
-      </div>
-    )
-  }
+  if (!calls.length) return <Searching searchableCount={searchableCount} />
   return (
     <div className="text-[15px] text-muted">
       Searching your books… <span className="text-faint">({calls.length})</span>

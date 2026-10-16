@@ -8,7 +8,18 @@
  */
 export const CHAT_UPDATED = 'librarian:chat-updated'
 
-export function notifyChatUpdated(): void {
+/**
+ * The chat the user just started, before the server knows about it.
+ *
+ * The session row is created inside POST /api/chat, so refetching the list at
+ * the moment of asking returned a list without the new chat — it only appeared
+ * on a later poll, up to twenty seconds of your own question missing from the
+ * history beside it. Carrying id and title on the event lets the sidebar show
+ * the entry immediately and drop it again once the server list contains it.
+ */
+export type StartedChat = { id: string; title: string }
+
+export function notifyChatUpdated(started?: StartedChat): void {
   if (typeof window === 'undefined') return
-  window.dispatchEvent(new Event(CHAT_UPDATED))
+  window.dispatchEvent(new CustomEvent<StartedChat | undefined>(CHAT_UPDATED, { detail: started }))
 }
