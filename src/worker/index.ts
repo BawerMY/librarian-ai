@@ -21,7 +21,7 @@ let stopping = false
 
 async function main() {
   const { db, editions } = await import('@/db')
-  const { indexEdition } = await import('@/lib/ingest/pipeline')
+  const { CancelledError, indexEdition, purgeEdition } = await import('@/lib/ingest/pipeline')
   const { ensureCollection } = await import('@/lib/qdrant')
   const { env } = await import('@/lib/env')
   const { and, eq, lt, or } = await import('drizzle-orm')
@@ -44,7 +44,32 @@ async function main() {
 
   if (reclaimed.length) console.log(`reclaimed ${reclaimed.length} stalled edition(s)`)
 
+  /**
+   * Finish deletions nobody finished.
+   *
+   * removeBook tombstones an edition the worker is holding and leaves the
+   * erasing to it. If that worker died first — or was not running at all —
+   * the row would sit in 'deleting' with its vectors and file intact, which
+   * is precisely the state the tombstone exists to prevent. Swept at boot and
+   * between books, so the longest a removed book survives is one book.
+   */
+  async function sweepDeleted(): Promise<void> {
+    const doomed = await db
+      .select({ id: editions.id })
+      .from(editions)
+      .where(eq(editions.indexStatus, 'deleting'))
+
+    for (const { id } of doomed) {
+      await purgeEdition(id)
+      console.log(`purged ${id} (removed while indexing)`)
+    }
+  }
+
+  await sweepDeleted()
+
   while (!stopping) {
+    await sweepDeleted()
+
     const next = await db.query.editions.findFirst({
       where: (e, { eq: isEq }) => isEq(e.indexStatus, 'pending'),
       orderBy: (e, { asc }) => asc(e.createdAt),
@@ -73,6 +98,13 @@ async function main() {
       const secs = ((Date.now() - started) / 1000).toFixed(1)
       console.log(`  ok — ${chunkCount} chunks in ${secs}s`)
     } catch (err) {
+      // A book the owner deleted mid-run is not a failure, and indexEdition
+      // has already purged it — say so plainly instead of logging an error
+      // for a row that no longer exists.
+      if (err instanceof CancelledError) {
+        console.log('  removed during indexing — purged')
+        continue
+      }
       // indexEdition already recorded 'failed' + the message on the row;
       // the Processing screen surfaces it. Keep the loop alive.
       console.error(`  failed — ${err instanceof Error ? err.message : String(err)}`)

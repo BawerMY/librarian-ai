@@ -161,9 +161,17 @@ export const editions = pgTable(
      * 'awaiting_file' is the state a copyrighted book sits in after the user
      * adds it but before they upload their copy — the design's "Needs file".
      * The worker only claims 'pending', so these are never picked up.
+     *
+     * 'deleting' is a tombstone, not a phase: the owner removed the book while
+     * the worker held it. The worker is the only writer of this edition's
+     * vectors, so it must be the one to stop and erase them — a deleter that
+     * cleaned up underneath it would race the next upsert and leave points
+     * behind that nothing could attribute or remove.
      */
     indexStatus: text('index_status')
-      .$type<'awaiting_file' | 'pending' | 'parsing' | 'embedding' | 'ready' | 'failed'>()
+      .$type<
+        'awaiting_file' | 'pending' | 'parsing' | 'embedding' | 'ready' | 'failed' | 'deleting'
+      >()
       .notNull()
       .default('pending'),
     /** 0-100, written per embed batch. Feeds the Processing screen. */
@@ -178,7 +186,7 @@ export const editions = pgTable(
     check('kind_values', sql`${t.kind} IN ('public','private')`),
     check(
       'index_status_values',
-      sql`${t.indexStatus} IN ('awaiting_file','pending','parsing','embedding','ready','failed')`,
+      sql`${t.indexStatus} IN ('awaiting_file','pending','parsing','embedding','ready','failed','deleting')`,
     ),
     // At most one public edition per work.
     uniqueIndex('editions_one_public_per_book')

@@ -2,7 +2,7 @@ import { and, desc, eq } from 'drizzle-orm'
 
 import { books, db, editions, userLibrary } from '@/db'
 import type { LibraryEntry } from '@/lib/ai/prompt'
-import { removeIndex } from '@/lib/ingest/pipeline'
+import { purgeEdition } from '@/lib/ingest/pipeline'
 import { formatEditionLabel } from '@/lib/retrieval/search'
 
 export type LibraryRow = {
@@ -16,7 +16,7 @@ export type LibraryRow = {
   edition: string
   status: 'ready' | 'needs_file'
   selected: boolean
-  indexStatus: 'awaiting_file' | 'pending' | 'parsing' | 'embedding' | 'ready' | 'failed'
+  indexStatus: 'awaiting_file' | 'pending' | 'parsing' | 'embedding' | 'ready' | 'failed' | 'deleting'
   progress: number
   error: string | null
   fileFormat: 'epub' | 'pdf' | 'txt' | null
@@ -279,10 +279,17 @@ async function fetchWorkByKey(workKey: string): Promise<{
 /**
  * Remove a book from a user's library.
  *
- * Private editions are destroyed — chunks cascade, and the vectors are deleted
- * by owner-scoped filter. Public editions are KEPT: they are shared, they cost
- * nothing per user, and discarding the indexing work would punish the next
- * person to add the same book.
+ * Private editions are destroyed completely — vectors, chunks, stored text,
+ * the uploaded file and the row. Public editions are KEPT: they are shared,
+ * they cost nothing per user, and discarding the indexing work would punish
+ * the next person to add the same book.
+ *
+ * Who does the erasing depends on whether the worker is holding the edition.
+ * It is the only writer of these vectors, so deleting underneath it would race
+ * its next upsert and strand points that no row could attribute or remove.
+ * While it is parsing or embedding, this marks a 'deleting' tombstone instead
+ * and the worker purges at its next batch boundary — a second or two later,
+ * and complete. Removal is therefore also how indexing is stopped.
  */
 export async function removeBook(userId: string, editionId: string): Promise<void> {
   const edition = await db.query.editions.findFirst({
@@ -297,8 +304,15 @@ export async function removeBook(userId: string, editionId: string): Promise<voi
   // Ownership re-checked rather than trusted: the editionId arrived over HTTP.
   if (edition.ownerUserId !== userId) return
 
-  await removeIndex(editionId)
-  await db.delete(editions).where(eq(editions.id, editionId))
+  if (edition.indexStatus === 'parsing' || edition.indexStatus === 'embedding') {
+    await db
+      .update(editions)
+      .set({ indexStatus: 'deleting', error: null })
+      .where(eq(editions.id, editionId))
+    return
+  }
+
+  await purgeEdition(editionId)
 }
 
 export async function setSelected(

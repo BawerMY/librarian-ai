@@ -1,7 +1,7 @@
 import { eq, inArray } from 'drizzle-orm'
 
 import { chatSessions, db, editions, revealLog, userLibrary, users } from '@/db'
-import { removeIndex } from '@/lib/ingest/pipeline'
+import { purgeEdition } from '@/lib/ingest/pipeline'
 import { COLLECTION, qdrant } from '@/lib/qdrant'
 
 /**
@@ -60,11 +60,15 @@ export async function reindexEdition(editionId: string): Promise<{ ok: boolean; 
   return { ok: true }
 }
 
-/** Delete an edition's derived data and the edition itself. */
+/**
+ * Delete an edition's derived data, its uploaded file, and the edition itself.
+ *
+ * Shares purgeEdition with the owner-facing path so an admin delete leaves
+ * exactly as little behind as a user delete does.
+ */
 export async function deleteEdition(editionId: string): Promise<void> {
-  await removeIndex(editionId)
   await db.delete(userLibrary).where(eq(userLibrary.editionId, editionId))
-  await db.delete(editions).where(eq(editions.id, editionId))
+  await purgeEdition(editionId)
 }
 
 /** Books nobody holds and that have no editions — catalog litter. */

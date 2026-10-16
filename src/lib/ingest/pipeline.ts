@@ -130,6 +130,19 @@ export async function indexEdition(editionId: string): Promise<IndexResult> {
 
     return { editionId, chunkCount: chunked.length }
   } catch (err) {
+    // The owner deleted the book mid-run. Finish the deletion they asked for
+    // rather than recording a failure against a row that should not survive:
+    // this is the only moment at which everything written so far — the partial
+    // vectors above all — is still identifiable.
+    //
+    // Any other error is read the same way if the row is gone or tombstoned:
+    // a delete landing between the chunk insert and its edition row surfaces
+    // as a foreign-key violation, which is a deletion, not a parse failure.
+    if (err instanceof CancelledError || (await cancelled(editionId))) {
+      await purgeEdition(editionId)
+      throw err instanceof CancelledError ? err : new CancelledError(editionId)
+    }
+
     const message = err instanceof Error ? err.message : String(err)
     await db
       .update(editions)
@@ -236,12 +249,77 @@ async function embedAndUpsert(edition: EditionRow, chunked: Chunk[]): Promise<vo
 
     await qdrant.upsert(COLLECTION, { wait: true, points })
 
+    // Between batches, not inside one: an upsert is the only write that can
+    // outlive a delete, so checking right after each is what bounds the
+    // orphan window to a single batch.
+    if (await cancelled(edition.id)) throw new CancelledError(edition.id)
+
     // 5-100: parsing already claimed the first few percent, and a bar that
     // starts at zero after visible work has happened reads as stalled.
     const done = Math.min(i + batch.length, chunked.length)
     const pct = 5 + Math.round((done / chunked.length) * 95)
     await setStatus(edition.id, 'embedding', pct)
   }
+}
+
+/**
+ * The owner removed the book while this edition was being indexed.
+ *
+ * Thrown from inside the embed loop so the run unwinds through indexEdition's
+ * own catch, which purges rather than recording a failure — a book the user
+ * deleted is not a book that failed.
+ */
+export class CancelledError extends Error {
+  constructor(editionId: string) {
+    super(`Indexing cancelled: ${editionId} was removed`)
+    this.name = 'CancelledError'
+  }
+}
+
+/**
+ * Erase a private edition completely: vectors, chunk rows, stored text, the
+ * uploaded file, and the edition itself.
+ *
+ * removeIndex() alone was not enough. It drops derived data, but the upload
+ * under UPLOAD_DIR is unlinked only on the success path of indexEdition — so
+ * removing a book before indexing finished left the user's file on disk with
+ * the row that recorded its path deleted, unreachable and permanent.
+ *
+ * Order matters: the file and the vectors go before the row. The row is what
+ * names them, so losing it first would strand both.
+ *
+ * Idempotent — it is called from the deleter, from the worker's cancellation
+ * path, and from the boot sweep, and any of those may have run already.
+ */
+export async function purgeEdition(editionId: string): Promise<void> {
+  const edition = await db.query.editions.findFirst({
+    where: (e, { eq: isEq }) => isEq(e.id, editionId),
+  })
+
+  if (edition?.sourceRef && edition.kind === 'private') {
+    // Gutenberg editions keep an id here, not a path; only uploads have a file.
+    await unlink(edition.sourceRef).catch(() => {})
+  }
+
+  await removeIndex(editionId)
+  await db.delete(editionText).where(eq(editionText.editionId, editionId))
+  await db.delete(editions).where(eq(editions.id, editionId))
+}
+
+/**
+ * Has the owner asked for this edition to go away?
+ *
+ * Checked between embed batches. The window that remains is one batch wide,
+ * and whatever that batch wrote is removed by the purge that follows.
+ */
+async function cancelled(editionId: string): Promise<boolean> {
+  const row = await db.query.editions.findFirst({
+    columns: { indexStatus: true },
+    where: (e, { eq: isEq }) => isEq(e.id, editionId),
+  })
+  // A row that vanished outright counts too: an admin delete, or a purge that
+  // beat us to it.
+  return !row || row.indexStatus === 'deleting'
 }
 
 /** Drop an edition's derived data. Postgres rows and vectors together. */

@@ -1,0 +1,2 @@
+ALTER TABLE "editions" DROP CONSTRAINT "index_status_values";--> statement-breakpoint
+ALTER TABLE "editions" ADD CONSTRAINT "index_status_values" CHECK ("editions"."index_status" IN ('awaiting_file','pending','parsing','embedding','ready','failed','deleting'));
